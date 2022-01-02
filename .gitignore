@@ -1,0 +1,7 @@
+
+/.idea*
+/data*
+/src/Notebooks*
+/src/old*
+/src/PreProcess*
+/src/Utils/Constants.py
