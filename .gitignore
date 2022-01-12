@@ -1,7 +1,9 @@
-
 /.idea*
 /data*
 /src/Notebooks*
 /src/old*
 /src/PreProcess*
 /src/Utils/Constants.py
+/old/
+/src/Utils/FilesAnalisys*
+/src/test.py
