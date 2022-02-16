@@ -1,12 +1,6 @@
 /.idea*
-/data*
-/src/Notebooks*
-/src/old*
-/src/PreProcess*
-/src/utils/Constants.py
-/old/
 /src/utils/files_analisys
-/src/tests/clusters_evaluation.py
-/src/tests/
+/tests/clusters_evaluation.py
+/tests/
 /notebooks/
 /src/EDAVisualization.py
