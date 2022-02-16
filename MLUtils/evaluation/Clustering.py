@@ -2,7 +2,7 @@ import itertools
 import numpy as np
 import pandas as pd
 
-import Visualization as Visualization
+import MLUtils.Visualization as Visualization
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -16,7 +16,7 @@ from sklearn.manifold import TSNE
 from kneed import KneeLocator
 from functools import reduce
 
-from MultiProcess import run_function_parallel
+from MLUtils.MultiProcess import run_function_parallel
 
 
 # region Evaluations

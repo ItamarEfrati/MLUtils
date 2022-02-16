@@ -1,1 +1,4 @@
 /.idea*
+/MLUtils.egg-info/
+/dist/
+/build/
