@@ -1,6 +1,1 @@
 /.idea*
-/src/utils/files_analisys
-/tests/clusters_evaluation.py
-/tests/
-/notebooks/
-/src/EDAVisualization.py
