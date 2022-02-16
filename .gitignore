@@ -3,7 +3,10 @@
 /src/Notebooks*
 /src/old*
 /src/PreProcess*
-/src/Utils/Constants.py
+/src/utils/Constants.py
 /old/
-/src/Utils/FilesAnalisys*
-/src/test.py
+/src/utils/files_analisys
+/src/tests/clusters_evaluation.py
+/src/tests/
+/notebooks/
+/src/EDAVisualization.py
