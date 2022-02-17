@@ -182,8 +182,6 @@ def plot_cluster_2d(features, labels, n_clusters, ax=None, reduction_algorithm='
     """
     if not ax:
         _, ax = plt.subplots(figsize=(15, 15))
-    else:
-        print(1)
     reductions_dict = {"TSNE": TSNE(n_components=2, learning_rate='auto', init='random')}
     two_dim_features = reductions_dict[reduction_algorithm].fit_transform(features)
     sns.scatterplot(x=two_dim_features[:, 0], y=two_dim_features[:, 1], hue=labels, legend='full', ax=ax,
