@@ -11,7 +11,7 @@ setuptools.setup(
     description='Machine learning utils',
     long_description=long_description,
     long_description_content_type="text/markdown",
-    packages=setuptools.find_packages(exclude=["MLUtils.tests"]),
+    packages=setuptools.find_packages(exclude=["MLUtils.examples"]),
     url='https://github.com/ItamarEfrati/MLUtils',
     project_urls={
         "Bug Tracker": "https://github.com/ItamarEfrati/MLUtils/issues"

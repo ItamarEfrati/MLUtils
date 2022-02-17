@@ -18,10 +18,21 @@ from functools import reduce
 
 from MLUtils.MultiProcess import run_function_parallel
 
+# region Cluster default arguments
+
+KMEANS_KWARG = {
+    "init": "k-means++",
+    "n_init": 50,
+    "max_iter": 1000,
+    "random_state": 42
+}
+
+
+# endregion
 
 # region Evaluations
 
-def evaluate_single_kmeans_(*args):
+def _evaluate_single_kmeans(*args):
     """
     Evaluate single kmeans
     :param args: a list of arguments. First item is dict arguments for kmeans
@@ -45,9 +56,9 @@ def evaluate_kmeans(features, kmeans_kwargs, clusters_range: range, njobs):
     """
     args_combinations = [(kmeans_kwargs.copy(), i, features) for i in clusters_range]
     list(map(lambda k: k[0].update({"n_clusters": k[1]}), args_combinations))
-    args_combinations = list(map(lambda d: (d[0], d[2]), args_combinations))
+    args_combinations = list(map(lambda d: (d[0], d[-1]), args_combinations))
 
-    kmeans_list = run_function_parallel(evaluate_single_kmeans_, njobs, *args_combinations)
+    kmeans_list = run_function_parallel(_evaluate_single_kmeans, njobs, *args_combinations)
     kmeans_dict = {g.n_clusters: g for g in kmeans_list}
     silhouette_coefficients = list(
         map(lambda g: silhouette_score(features, g.labels_, metric='euclidean'), kmeans_dict.values()))
@@ -86,7 +97,7 @@ def evaluate_dbscan(features, min_samples):
     return dbscan
 
 
-def evaluate_single_gmm_(*args):
+def _evaluate_single_gmm(*args):
     """
     Evaluate single GMM
     :param args: a list of arguments. First item is dict arguments for gmm
@@ -94,7 +105,7 @@ def evaluate_single_gmm_(*args):
     :return: the trained kmeans object and it's label for the given data
     """
     gmm = GaussianMixture(**args[0][0])
-    labels = gmm.fit_predict(args[0][1])
+    labels = gmm.fit_predict(X=args[0][1])
     return gmm, labels
 
 
@@ -112,24 +123,26 @@ def evaluate_gmm(features, gmm_kwargs, components_range, njobs=-1):
     covariance_types = sorted(["spherical", "tied", "diag", "full"])
     args_combinations = [(gmm_kwargs.copy(), i, j, features) for i in components_range for j in covariance_types]
     list(map(lambda k: k[0].update({"n_components": k[1], "covariance_type": k[2]}), args_combinations))
-    args_combinations = list(map(lambda d: (d[0], d[2]), args_combinations))
+    args_combinations = list(map(lambda d: (d[0], d[-1]), args_combinations))
 
-    gmms_list = run_function_parallel(evaluate_single_gmm_, njobs, *args_combinations)
+    gmms_list = run_function_parallel(_evaluate_single_gmm, njobs, *args_combinations)
     gmms_dict = {(g[0].n_components, g[0].covariance_type): g for g in gmms_list}
     gmms_dict = dict(sorted(gmms_dict.items()))
     silhouette_coefficients = list(
         map(lambda g: silhouette_score(features, g[1], metric='euclidean'), gmms_dict.values()))
 
     bic_scores_list = list(map(lambda g: g[0].bic(features), gmms_dict.values()))
-    plot_bic_scores(bic_scores_list, components_range, covariance_types)
+    minimum_arg_index = plot_bic_scores(bic_scores_list, components_range, covariance_types)
+    print("Minimum bic score is for", args_combinations[minimum_arg_index][0])
 
     silhouette_coefficients_dict = {}
     for i, covariance_type in enumerate(covariance_types):
         silhouette_coefficients_dict[covariance_type] = [components_range,
                                                          silhouette_coefficients[i::len(covariance_types)]]
 
-    Visualization.plot_graphs(silhouette_coefficients_dict, n_rows=2, n_columns=2, x_label='number of components',
-                              y_label='silhouette score')
+    x_label = ['number of components'] * len(silhouette_coefficients_dict)
+    y_label = ['silhouette score'] * len(silhouette_coefficients_dict)
+    Visualization.plot_graphs(silhouette_coefficients_dict, n_rows=2, n_columns=2, x_label=x_label, y_label=y_label)
 
     return gmms_dict
 
@@ -148,7 +161,7 @@ def decision_tree_analysis(data: pd.DataFrame, labels: pd.Series):
         feature_importance_df = pd.DataFrame([data.columns, dt.feature_importances_]).T
         feature_importance_df.sort_values(by=1, ascending=False, inplace=True)
         feature_importance_df.reset_index(inplace=True, drop=True)
-        feature_importance_df.columns = [f"cluster {i} features", f"cluster {i}"]
+        feature_importance_df.columns = [f"cluster {i} features", f"cluster {i} features scores"]
         features_importance_list.append(feature_importance_df)
 
     return reduce(lambda df1, df2: pd.merge(df1, df2, left_index=True, right_index=True), features_importance_list)
@@ -169,9 +182,11 @@ def plot_cluster_2d(features, labels, n_clusters, ax=None, reduction_algorithm='
     """
     if not ax:
         _, ax = plt.subplots(figsize=(15, 15))
+    else:
+        print(1)
     reductions_dict = {"TSNE": TSNE(n_components=2, learning_rate='auto', init='random')}
     two_dim_features = reductions_dict[reduction_algorithm].fit_transform(features)
-    sns.scatterplot(two_dim_features[:, 0], two_dim_features[:, 1], hue=labels, legend='full', ax=ax,
+    sns.scatterplot(x=two_dim_features[:, 0], y=two_dim_features[:, 1], hue=labels, legend='full', ax=ax,
                     palette=sns.color_palette("bright", n_clusters))
 
     plt.show()
@@ -200,13 +215,12 @@ def plot_kmeans_evaluation_results(clusters_range, sse, silhouette_coefficients)
     print("The elbow is at", kl.elbow)
 
 
-def plot_bic_scores(bic_scores, clusters_range, covariance_types, ax=None):
+def plot_bic_scores(bic_scores, clusters_range, covariance_types):
     """
 
     :param bic_scores:
     :param clusters_range:
     :param covariance_types:
-    :param ax:
     :return:
     """
     bars = []
@@ -225,19 +239,9 @@ def plot_bic_scores(bic_scores, clusters_range, covariance_types, ax=None):
             )
         )
     plt.xticks(clusters_range)
-    plt.ylim([bic_scores.min() * 1.01 - 0.01 * bic_scores.max(), bic_scores.max()])
-    plt.title("BIC score per model")
-    xpos = (
-            np.mod(bic_scores.argmin(), len(clusters_range))
-            + 0.65
-            + 0.2 * np.floor(bic_scores.argmin() / len(clusters_range))
-    )
-    plt.text(xpos, bic_scores.min() * 0.97 + 0.03 * bic_scores.max(), "*", fontsize=14)
     subplots.set_xlabel("Number of components")
     subplots.legend([b[0] for b in bars], covariance_types)
     plt.show()
+    return np.argmin(bic_scores)
 
 # endregion
-
-
-
