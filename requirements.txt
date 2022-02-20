@@ -2,6 +2,7 @@
 # $ conda create --name <env> --file <this file>
 # platform: win-64
 
+python==3.9
 numpy
 pandas
 scikit-learn

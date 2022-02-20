@@ -1,19 +1,13 @@
-import array
+import pandas as pd
+import numpy as np
 import itertools
+
 from abc import ABC, abstractmethod
 from itertools import accumulate
 
-import pandas as pd
-import numpy as np
-
-from sklearn.feature_selection import VarianceThreshold, SelectKBest, SequentialFeatureSelector
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import KFold
-from sklearn.naive_bayes import GaussianNB
+from sklearn.feature_selection import VarianceThreshold, SelectKBest
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
-from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
-
 from mlxtend.feature_selection import SequentialFeatureSelector as SFS
 
 
@@ -21,29 +15,36 @@ class _ColumnsNames:
     features_indices_column = "feature_num"
     features_name_column = "feature"
     scoring_column = "score"
-    sum_rank_column = "sum_rank"
-    sum_indicator_column = "sum_index"
+    sum_rank_column = "sum_score"
+    sum_indicator_column = "sum_indicators"
 
 
 # region Variance Feature Selection
 
-def get_variance_features(data_df: pd.DataFrame, variance_threshold=(.99 * (1 - .99))):
+def get_variance_features(data_df: pd.DataFrame, variance_threshold=(.99 * (1 - .99)), features_indices=None):
     """
     scale data in [0,1] (sklearn MinMaxScaler) and apply sklearn VarianceThreshold to remove features (columns)
     with variance lower the threshold
+    :param features_indices:
     :param data_df: data-frame of the data to remove low variance features (columns)
     :param variance_threshold: threshold for variance with default value (.99 * (1 - .99)).
                                Features with lower variance than threshold will be removed.
     :return: a tuple of the selected feature indices and their names
     """
+    if features_indices is None:
+        features_indices = pd.Series(list(range(data_df.shape[1])))
+    elif isinstance(features_indices, pd.Series):
+        features_indices = pd.Series(features_indices)
+
     variance_selector = VarianceThreshold(threshold=variance_threshold)
-    min_max_scaler = MinMaxScaler()
-    scaled_data = min_max_scaler.fit_transform(data_df)
+    min_max_scalier = MinMaxScaler()
+    scaled_data = min_max_scalier.fit_transform(data_df)
     variance_selector.fit_transform(scaled_data)
     selected_features_indices = variance_selector.get_support(indices=True)
     print(f"VarianceThreshold selected {data_df.iloc[:, selected_features_indices].shape[1]}"
           f" out of {data_df.shape[1]} features")
-    return selected_features_indices, list(data_df.iloc[:, selected_features_indices].columns)
+    return list(features_indices.iloc[selected_features_indices].values), \
+           list(data_df.iloc[:, selected_features_indices].columns)
 
 
 # endregion
@@ -77,9 +78,9 @@ class _UnivariateScore:
 def get_univariate_feature_indices(data_df,
                                    label_df,
                                    univariate_methods_list,
-                                   num_ranks_features,
-                                   num_features_to_select,
-                                   is_num_is_top,
+                                   num_features_to_select_by_score,
+                                   num_features_to_select_total,
+                                   is_num_is_max,
                                    features_indices=None):
     """
     Select features using univariate methods by computing the feature importance for each method and combine the ranks.
@@ -87,47 +88,42 @@ def get_univariate_feature_indices(data_df,
     :param label_df: data-frame of the label
     :param features_indices: the original indices of the feature
     :param univariate_methods_list: a list of sklearn feature selection methods
-    :param num_ranks_features: number of features to select for each method for the ranks calculation
-    :param is_num_is_top: True if num of features to select is maximum otherwise the num is minimum
-    :param num_features_to_select:
+    :param num_features_to_select_by_score: number of features to select for each method for the ranks calculation
+    :param is_num_is_max: True if num of features to select is maximum otherwise the num is minimum
+    :param num_features_to_select_total: the total number features to select
     :return: the original indices of the selected features
     """
     if features_indices is None:
         features_indices = list(range(data_df.shape[1]))
-    print("Evaluating scores")
+    print("Evaluating univariate scores")
+
     univariate_scores_list = list(
         map(lambda x: _UnivariateScore(x, features_indices, data_df.columns), univariate_methods_list))
     univariate_scores_list = list(map(lambda x: x.compute_features_score(data_df, label_df), univariate_scores_list))
+    features_rank_df = _get_features_rank_by_score(univariate_scores_list, num_features_to_select_by_score)
 
-    print("Computing ranks")
-    features_rank_df = _get_features_rank_by_score(univariate_scores_list, num_ranks_features)
-    selected_univariate_features_df = _selected_features_by_rank(features_rank_df, num_features_to_select,
-                                                                 is_num_is_top)
-    selected_univariate_indices = list(selected_univariate_features_df[_ColumnsNames.features_indices_column])
-
-    print(f"Custom univariate selected {len(selected_univariate_indices)} out of {data_df.shape[1]} features")
-    return selected_univariate_indices, list(data_df.iloc[:, selected_univariate_indices].columns)
+    return _finalize_feature_selection_process(data_df, is_num_is_max, num_features_to_select_total, features_rank_df)
 
 
 # endregion
 
 # region Multivariate feature selection
 
-def _get_multivariate_class(method_name, params):
+def _get_multivariate_class(method_name, params: dict):
     if method_name in "decision_tree":
-        return _DecisionTreeMultivariateScore(params[0], params[1], params[2])
+        return _DecisionTreeMultivariateScore(**params)
     if method_name in "sfs":
-        return _SequentialFeatureSelectionMultivariateScore(params[0], params[1], params[2])
+        return _SequentialFeatureSelectionMultivariateScore(**params)
     return None
 
 
 class _MultivariateScore(ABC):
 
-    # Todo check min_to_select
-    def __init__(self, num_features_to_select, features_indices, features_names):
-        self.min_to_select = num_features_to_select
+    def __init__(self, num_ranks_features, features_indices, features_names, kwargs: dict):
+        self.num_ranks_features = num_ranks_features
         self.features_indices = features_indices
         self.features_names = features_names
+        self.kwargs = kwargs
 
     @abstractmethod
     def run_method(self, data_df, label_df, cv, groups):
@@ -181,7 +177,7 @@ class _DecisionTreeMultivariateScore(_MultivariateScore):
         ls_fold = []
         for fold_num, (train_index, test_index) in enumerate(cross_validation.split(data_df, label_df, groups)):
             print(f"Evaluating fold {fold_num}")
-            decision_tree = DecisionTreeClassifier()
+            decision_tree = DecisionTreeClassifier(**self.kwargs)
             current_data_df, current_label_df = data_df.iloc[train_index], label_df.iloc[train_index]
             ccp_alphas = decision_tree.cost_complexity_pruning_path(current_data_df, current_label_df)["ccp_alphas"]
             best_tree = self.find_best_tree(current_data_df, current_label_df, ccp_alphas)
@@ -192,116 +188,23 @@ class _DecisionTreeMultivariateScore(_MultivariateScore):
 
             ls_fold.append(best_tree_score_df)
 
-        select_rank_tree_df = _get_features_rank_by_score(ls_fold, self.min_to_select, weighting=True)
+        select_rank_tree_df = _get_features_rank_by_score(ls_fold, self.num_ranks_features, weighting=True)
 
         return select_rank_tree_df
 
 
-class _SequentialFeatureSelectionMultivariateScore_sklearn(_MultivariateScore):
-
-    def __init__(self, num_features_to_select, features_indices, features_names):
-        super().__init__(num_features_to_select, features_indices, features_names)
-        # self.sfs_clf_ls = [SVC(kernel='linear'), GaussianNB(), LogisticRegression()]
-        self.sfs_clf_ls = [LogisticRegression()]
-
-    def summarize_results(self, classifiers_results: list):
-        """
-        combine the selection indicators and ranks of the features according to the given classifiers
-        :param classifiers_results: list of lists - a list per classifier. a classifier list includes
-            the following SFS items:
-            0: k_feature_idx_ - Feature Indices of the selected feature subsets,
-            1: k_feature_names_ - Feature names of the selected feature subsets,
-            2: k_score_ - Cross validation average score of the selected subset,
-            3: subsets_ - dictionary with MLxtend sequential forward selection subsets,
-            4: list of ordered indices of the features according to their introduction order to the model
-        :return: list of two data-frames.
-            the first data-frame with feature indices, names and selector indicator column per classifier that
-            represents whether the feature was selected according to that classifier.
-            the second data-frame with feature indices, names and rank column per classifier that represents
-            the order when the feature was introduced to the model according to that classifier.
-        """
-        zeros = np.zeros(len(self.features_indices))
-        columns = [_ColumnsNames.features_indices_column, _ColumnsNames.features_name_column,
-                   _ColumnsNames.sum_indicator_column, _ColumnsNames.sum_rank_column]
-        summary_df = pd.DataFrame(zip(self.features_indices, self.features_names, zeros, zeros), columns=columns)
-
-        for i, classifier_results in enumerate(classifiers_results):
-            summary_df.loc[classifier_results[0], _ColumnsNames.sum_indicator_column] += 1
-            features_ranks = dict(zip(classifier_results[1], range(1, 1 + len(classifier_results[1]))))
-            summary_df[_ColumnsNames.sum_rank_column] = summary_df.apply(
-                lambda x: x[_ColumnsNames.sum_rank_column] + features_ranks[x[_ColumnsNames.features_name_column]],
-                axis=1)
-
-        return summary_df
-
-    @staticmethod
-    def ordered_features(subsets: dict) -> list:
-        """
-        get MLxtend sequential forward selection subsets dict and return a list with the features indices ordered
-        according to their addition to the model
-        :param subsets: dictionary with MLxtend sequential forward selection subsets
-            A dictionary of selected feature subsets during the sequential selection,
-            where the dictionary keys are the lengths k of these feature subsets. The dictionary values are
-            dictionaries themselves with the following keys: 'feature_idx' (tuple of indices of the feature subset)
-            'feature_names' (tuple of feature names of the feat. subset)
-            'cv_scores' (list individual cross-validation scores)
-            'avg_score' (average cross-validation score)
-        :return: list of feature indices according to the order they were added to the model
-        """
-        subsets_df = pd.DataFrame.from_dict(subsets)
-        ls = [[*set(subsets_df.iloc[3, 0]), ]]
-        for col_index in range(len(subsets_df.columns) - 1):
-            set1 = set(subsets_df.iloc[3, col_index])
-            set2 = set(subsets_df.iloc[3, col_index + 1])
-            diff = set2.difference(set1)
-            ls.append([*diff, ])
-        merged = list(itertools.chain.from_iterable(ls))
-        return merged
-
-    def get_sequential_features_selection_results(self, data_df, label_df, k_feature_range: str, cv,
-                                                  groups) -> pd.DataFrame:
-        """
-        create a data-frame with feature indices, names and relative importance that represents the multi-variate
-        relation strength to the target according to sequential feature selection (SFS) methods.Execute several SFS
-        corresponding to the given classifiers list and combining the corresponding feature importance, selection
-        indicator, and rank
-        :param groups:
-        :param cv: cross validation object
-        :param data_df: data-frame of data to calculate it's features (columns) importance. columns names are indices
-        :param label_df: data-frame of data to explore multi-variate relation with each feature
-        :param k_feature_range: interval range to limit the forward selection. could also be 'best' or 'parsimonious'
-        :return: list of lists - a list per classifier. a classifier list includes the following SFS items:
-        0: k_feature_idx_ - Feature Indices of the selected feature subsets,
-        1: k_feature_names_ - Feature names of the selected feature subsets,
-        2: k_score_ - Cross validation average score of the selected subset,
-        3: subsets_ - dictionary with MLxtend sequential forward selection subsets,
-        4: list of ordered indices of the features according to their introduction order to the model
-        """
-        print("Running sequential forward selection")
-        list_ls = []
-        for i, clf in enumerate(self.sfs_clf_ls):
-            print(f"Running classifier number {i + 1}")
-            sfs = SequentialFeatureSelector(clf, n_features_to_select=k_feature_range, direction='forward', cv=cv, n_jobs=-1)
-            sfs.fit(data_df, label_df, groups=groups)
-            running_results = [list(sfs.k_feature_idx_), self.ordered_features(sfs.subsets_)]
-            list_ls.append(running_results)
-        return self.summarize_results(list_ls)
-
-    def run_method(self, data_df, label_df, cv, groups):
-        scaled_data_df = pd.DataFrame(StandardScaler().fit_transform(data_df), columns=data_df.columns)
-        sfs_results_df = self.get_sequential_features_selection_results(scaled_data_df, label_df.to_numpy().reshape(-1),
-                                                                        'parsimonious', cv, groups)
-        sfs_results_df.sort_values(by=[_ColumnsNames.sum_indicator_column, _ColumnsNames.sum_rank_column],
-                                   ascending=[False, True], inplace=True)
-        return sfs_results_df
-
-
 class _SequentialFeatureSelectionMultivariateScore(_MultivariateScore):
 
-    def __init__(self, num_features_to_select, features_indices, features_names):
-        super().__init__(num_features_to_select, features_indices, features_names)
-        # self.sfs_clf_ls = [SVC(kernel='linear'), GaussianNB(), LogisticRegression()]
-        self.sfs_clf_ls = [LogisticRegression()]
+    def __init__(self,
+                 num_ranks_features,
+                 features_indices,
+                 features_names,
+                 kwargs: dict):
+        super().__init__(num_ranks_features, features_indices, features_names, kwargs)
+        if 'estimator' not in kwargs.keys() or not isinstance(kwargs['estimator'], list):
+            raise Exception(
+                "No estimators provided for this run. Please add a list of classifiers with key 'estimator'")
+        self.estimators = self.kwargs.pop('estimator')
 
     def summarize_results(self, classifiers_results: list):
         """
@@ -357,8 +260,12 @@ class _SequentialFeatureSelectionMultivariateScore(_MultivariateScore):
         merged = list(itertools.chain.from_iterable(ls))
         return merged
 
-    def get_sequential_features_selection_results(self, data_df, label_df, k_feature_range: str, cv,
-                                                  groups) -> pd.DataFrame:
+    def get_sequential_features_selection_results(self,
+                                                  data_df,
+                                                  label_df,
+                                                  cv,
+                                                  groups
+                                                  ) -> pd.DataFrame:
         """
         create a data-frame with feature indices, names and relative importance that represents the multi-variate
         relation strength to the target according to sequential feature selection (SFS) methods.Execute several SFS
@@ -368,7 +275,6 @@ class _SequentialFeatureSelectionMultivariateScore(_MultivariateScore):
         :param cv: cross validation object
         :param data_df: data-frame of data to calculate it's features (columns) importance. columns names are indices
         :param label_df: data-frame of data to explore multi-variate relation with each feature
-        :param k_feature_range: interval range to limit the forward selection. could also be 'best' or 'parsimonious'
         :return: list of lists - a list per classifier. a classifier list includes the following SFS items:
         0: k_feature_idx_ - Feature Indices of the selected feature subsets,
         1: k_feature_names_ - Feature names of the selected feature subsets,
@@ -376,20 +282,19 @@ class _SequentialFeatureSelectionMultivariateScore(_MultivariateScore):
         3: subsets_ - dictionary with MLxtend sequential forward selection subsets,
         4: list of ordered indices of the features according to their introduction order to the model
         """
-        print("Running sequential forward selection")
+        print("Running sequential features selection")
         list_ls = []
-        for i, clf in enumerate(self.sfs_clf_ls):
+        for i, clf in enumerate(self.estimators):
             print(f"Running classifier number {i + 1}")
-            sfs = SFS(clf, k_features=k_feature_range, forward=True, floating=False, verbose=1, cv=cv, n_jobs=-1)
+            sfs = SFS(estimator=clf, verbose=1, cv=cv, **self.kwargs)
             sfs.fit(data_df, label_df, groups=groups)
-            running_results = [list(sfs.k_feature_idx_), self.ordered_features(sfs.subsets_)]
-            list_ls.append(running_results)
+            list_ls.append([list(sfs.k_feature_idx_), self.ordered_features(sfs.subsets_)])
         return self.summarize_results(list_ls)
 
     def run_method(self, data_df, label_df, cv, groups):
         scaled_data_df = pd.DataFrame(StandardScaler().fit_transform(data_df), columns=data_df.columns)
         sfs_results_df = self.get_sequential_features_selection_results(scaled_data_df, label_df.to_numpy().reshape(-1),
-                                                                        'parsimonious', cv, groups)
+                                                                        cv, groups)
         sfs_results_df.sort_values(by=[_ColumnsNames.sum_indicator_column, _ColumnsNames.sum_rank_column],
                                    ascending=[False, True], inplace=True)
         return sfs_results_df
@@ -409,72 +314,49 @@ def _combine_multivariate_feature_selection(dfs_list):
 
 def get_multivariate_feature_indices(data_df,
                                      label_df,
-                                     multivariate_methods_list,
-                                     num_ranks_features,
-                                     num_features_to_select,
-                                     is_num_is_top,
-                                     cross_validation,
+                                     multivariate_methods_dict: dict,
+                                     num_features_to_select_by_score,
+                                     num_features_to_select_total,
+                                     is_num_is_max,
+                                     cross_validation=None,
                                      features_indices=None,
                                      groups=None):
     """
-
-    :param is_num_is_top:
-    :param num_features_to_select:
-    :param data_df:
-    :param label_df:
-    :param features_indices:
-    :param num_ranks_features:
-    :param multivariate_methods_list:
-    :param cross_validation:
-    :param groups:
-    :return:
+    Select features using multivariate methods by computing the feature importance for each method and combine the ranks
+    :param data_df: data-frame of the data
+    :param label_df: data-frame of the label
+    :param multivariate_methods_dict: a dict where the keys are methods names and the value is the methods parameters
+                                      pass as kwargs
+    :param num_features_to_select_by_score: number of features to select for each method for the ranks calculation
+    :param num_features_to_select_total: number of features to select at the end
+    :param is_num_is_max: bool, is the num features to select is max or minimum. If True will return at most
+                          num_features_to_select otherwise will return at least
+    :param cross_validation: sklearn cross validation object. If the method requires cross validation you need to
+                             pass it here
+    :param features_indices: a list of int, the original indices of the features in case of a combination of features
+                             selection methods
+    :param groups: optional, the group of each sample
+    :return: the selected features indices and their names
     """
     if features_indices is None:
         features_indices = list(range(data_df.shape[1]))
+    print("Evaluating multivariate scores")
 
-    multivariate_methods_dict = {k: [num_ranks_features, features_indices, data_df.columns] for k in
-                                 multivariate_methods_list}
+    multivariate_methods_dict = {k: {"num_ranks_features": num_features_to_select_by_score,
+                                     "features_indices": features_indices,
+                                     "features_names": data_df.columns,
+                                     "kwargs": v}
+                                 for k, v in multivariate_methods_dict.items()}
 
-    multivariate_features_ranks = []
+    multivariate_scores_list = []
     for method_name, params in multivariate_methods_dict.items():
         multivariate_method_class = _get_multivariate_class(method_name, params)
-        multivariate_features_ranks.append(
+        multivariate_scores_list.append(
             multivariate_method_class.run_method(data_df, label_df, cross_validation, groups))
 
-    ranked_features_df = _combine_multivariate_feature_selection(multivariate_features_ranks)
-    selected_features_df = _selected_features_by_rank(ranked_features_df, num_features_to_select,
-                                                      is_num_is_minimum=is_num_is_top)
+    ranked_features_df = _combine_multivariate_feature_selection(multivariate_scores_list)
 
-    return selected_features_df[_ColumnsNames.features_indices_column].to_numpy()
-
-
-# endregion
-
-# region custom selection
-
-def custom_feature_selection(data_df, label_df, cross_validation, groups, univariate_methods_list, min_to_select,
-                             top_univariate, top_multivariate, multivariate_methods_dict):
-    chosen_variance_features_indices, chosen_variance_features_names = get_variance_features(data_df)
-    variance_data_df = data_df.iloc[:, chosen_variance_features_indices]
-
-    selected_univariate_indices, chosen_univariate_features_names = \
-        get_univariate_feature_indices(variance_data_df,
-                                       label_df,
-                                       univariate_methods_list,
-                                       min_to_select,
-                                       is_num_is_top=False,
-                                       num_features_to_select=top_univariate,
-                                       features_indices=chosen_variance_features_indices)
-
-    univariate_features_df = data_df.iloc[:, selected_univariate_indices]
-
-    multivariate_methods_dict = {k: [min_to_select] + v for k, v in multivariate_methods_dict.items()}
-    multivariate_features_indices = get_multivariate_feature_indices(univariate_features_df, label_df,
-                                                                     selected_univariate_indices,
-                                                                     top_multivariate, multivariate_methods_dict,
-                                                                     cross_validation, groups)
-
-    return data_df.iloc[:, multivariate_features_indices].columns
+    return _finalize_feature_selection_process(data_df, is_num_is_max, num_features_to_select_total, ranked_features_df)
 
 
 # endregion
@@ -536,50 +418,30 @@ def _get_features_rank_by_score(feature_selection_scores_list: list, num_feature
     return features_combine_score_df
 
 
-def _selected_features_by_rank(ranks_df: pd.DataFrame, num_features_to_select: int = 50,
-                               is_num_is_minimum: bool = True):
+def _select_features_by_rank(ranks_df: pd.DataFrame, num_features_to_select: int = 50,
+                             is_num_is_max: bool = True):
     """
     Select the minimum between input number and the most influential features (at least in one method this feature was
     selected)
     :param ranks_df: data-frame which is sorted first in descending order of the sum number of methods
         that selected the feature and second in ascending order of their sum of ranks
     :param num_features_to_select: int that determine the number of first row of df_select_rank to return
-    :param is_num_is_minimum: str that determines whether to select minimum or maximum top_features
+    :param is_num_is_max: str that determines whether to select minimum or maximum top_features
     :return: data-frame containing only the selected features.
     """
     indices = ranks_df[_ColumnsNames.sum_indicator_column] >= 1
-    if is_num_is_minimum:
+    if is_num_is_max:
         number = np.minimum(num_features_to_select, np.sum(indices))
     else:
         number = np.maximum(num_features_to_select, np.sum(indices))
     return ranks_df[[_ColumnsNames.features_indices_column, _ColumnsNames.features_name_column]].head(number)
 
 
+def _finalize_feature_selection_process(data_df, is_num_is_max, num_features_to_select, ranked_features_df):
+    print("Computing ranks")
+    selected_features_df = _select_features_by_rank(ranked_features_df, num_features_to_select, is_num_is_max)
+    print(f"Custom selection selected {selected_features_df.shape[0]} out of {data_df.shape[1]} features")
+    return list(selected_features_df[_ColumnsNames.features_indices_column]), \
+           list(selected_features_df[_ColumnsNames.features_name_column].values)
+
 # endregion
-
-
-if __name__ == '__main__':
-    from sklearn import datasets
-
-    covertype = datasets.fetch_covtype(as_frame=True)
-    covertype_df = covertype.frame
-    data_df_1 = covertype_df.drop(columns='Cover_Type')
-    # data_df_1 = data_df_1.iloc[:500]
-    label_df_1 = covertype_df['Cover_Type']
-
-    num_ranks_features = 10
-    top_multivariate_1 = 20
-    min_to_select_1 = 10
-    skf = KFold(n_splits=3)
-    multivariate_methods = ["sfs"]
-    multivariate_methods_dict_1 = {"sfs": [], "decision_tree": []}
-    multivariate_methods_dict_1 = {k: [min_to_select_1] + v for k, v in multivariate_methods_dict_1.items()}
-
-    multivariate_features_indices = get_multivariate_feature_indices(data_df_1,
-                                                                     label_df_1,
-                                                                     multivariate_methods,
-                                                                     num_ranks_features,
-                                                                     top_multivariate_1,
-                                                                     is_num_is_top=False,
-                                                                     cross_validation=skf,
-                                                                     groups=None)
