@@ -128,12 +128,11 @@ def evaluate_gmm(features, gmm_kwargs, components_range, njobs=-1):
     gmms_list = run_function_parallel(_evaluate_single_gmm, njobs, *args_combinations)
     gmms_dict = {(g[0].n_components, g[0].covariance_type): g for g in gmms_list}
     gmms_dict = dict(sorted(gmms_dict.items()))
-    silhouette_coefficients = list(
-        map(lambda g: silhouette_score(features, g[1], metric='euclidean'), gmms_dict.values()))
-
+    silhouette_coefficients = [silhouette_score(features, g[1], metric='euclidean') for g in gmms_dict.values()]
+    bic_scores_dict = {k: g[0].bic(features) for k, g in gmms_dict.items()}
     bic_scores_list = list(map(lambda g: g[0].bic(features), gmms_dict.values()))
-    minimum_arg_index = plot_bic_scores(bic_scores_list, components_range, covariance_types)
-    print("Minimum bic score is for", args_combinations[minimum_arg_index][0])
+    plot_bic_scores(bic_scores_list, components_range, covariance_types)
+    print("Minimum bic score is for", min(bic_scores_dict, key=bic_scores_dict.get))
 
     silhouette_coefficients_dict = {}
     for i, covariance_type in enumerate(covariance_types):
@@ -181,7 +180,7 @@ def plot_cluster_2d(features, labels, n_clusters, ax=None, reduction_algorithm='
     :param n_clusters:
     """
     if not ax:
-        _, ax = plt.subplots(figsize=(15, 15))
+        _, ax = plt.subplots()
     reductions_dict = {"TSNE": TSNE(n_components=2, learning_rate='auto', init='random')}
     two_dim_features = reductions_dict[reduction_algorithm].fit_transform(features)
     sns.scatterplot(x=two_dim_features[:, 0], y=two_dim_features[:, 1], hue=labels, legend='full', ax=ax,
@@ -231,7 +230,7 @@ def plot_bic_scores(bic_scores, clusters_range, covariance_types):
         bars.append(
             plt.bar(
                 xpos,
-                bic_scores[i * len(clusters_range): (i + 1) * len(clusters_range)],
+                bic_scores[i:: len(covariance_types)],
                 width=0.2,
                 color=color,
             )
@@ -240,6 +239,6 @@ def plot_bic_scores(bic_scores, clusters_range, covariance_types):
     subplots.set_xlabel("Number of components")
     subplots.legend([b[0] for b in bars], covariance_types)
     plt.show()
-    return np.argmin(bic_scores)
+
 
 # endregion

@@ -25,7 +25,7 @@ def plot_simple_graph(x, y, x_label, y_label, title, ax: Axes = None):
         plt.show()
 
 
-def plot_graphs(data_dict, n_rows, n_columns, x_label, y_label, row_size=8, col_size=8):
+def plot_graphs(data_dict, n_rows, n_columns, x_label, y_label, row_size=6, col_size=6):
     """
 
     :param n_rows:
