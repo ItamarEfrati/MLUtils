@@ -33,7 +33,7 @@ def get_variance_features(data_df: pd.DataFrame, variance_threshold=(.99 * (1 - 
     """
     if features_indices is None:
         features_indices = pd.Series(list(range(data_df.shape[1])))
-    elif isinstance(features_indices, pd.Series):
+    elif not isinstance(features_indices, pd.Series):
         features_indices = pd.Series(features_indices)
 
     variance_selector = VarianceThreshold(threshold=variance_threshold)
