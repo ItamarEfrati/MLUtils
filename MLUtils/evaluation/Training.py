@@ -26,7 +26,9 @@ def split_train_test(df: pd.DataFrame, label_column: str, splitter: BaseCrossVal
     :param splitter: sklearn spliter implementing BaseCrossValidator
     :return: train test splits and train groups
     """
-    train_inx, test_inx = next(splitter.split(df, groups=groups))
+    X = df.drop(columns=label_column)
+    y = df[label_column]
+    train_inx, test_inx = next(splitter.split(X, y, groups=groups))
     train_groups = list(df.drop(columns=[label_column]).iloc[train_inx].index.get_level_values(0))
     X_train = df.drop(columns=[label_column]).iloc[train_inx].values
     X_test = df.drop(columns=[label_column]).iloc[test_inx].values
@@ -43,7 +45,8 @@ def eval_grid_search(estimator,
                      X_test: np.array,
                      y_train: np.array,
                      y_test: np.array,
-                     spliter: BaseCrossValidator):
+                     spliter: BaseCrossValidator,
+                     train_groups=None):
     """
     Running a full evaluation of the data. Training a classifier using gridsearch with grid parameters. Evaluating the
     test data using the best grid params and plot the classification report of the train and test data
@@ -54,10 +57,11 @@ def eval_grid_search(estimator,
     :param y_train:
     :param y_test:
     :param spliter: splitter: sklearn spliter implementing BaseCrossValidator
+    :param train_groups:
     :return:
     """
     grid_search = GridSearchCV(estimator, grid_params, cv=spliter, n_jobs=-1, verbose=4)
-    grid_search.fit(X_train, y_train)
+    grid_search.fit(X_train, y_train, groups=train_groups)
 
     print("Best params")
     print(grid_search.best_params_)
