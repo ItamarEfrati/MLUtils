@@ -20,22 +20,24 @@ RANDOM_FOREST_PARAMS = {
 }
 
 
-def split_train_test(df: pd.DataFrame, groups: pd.Series, label_columns: str, splitter: BaseCrossValidator):
+def split_train_test(df: pd.DataFrame, label_column: str, splitter: BaseCrossValidator, groups: pd.Series = None):
     """
     split a dataframe into train and test splits
     :param df: the dataframe to split
     :param groups: the groups of each row. Can be None
-    :param label_columns: the column of the label
+    :param label_column: the column of the label
     :param splitter: sklearn spliter implementing BaseCrossValidator
     :return: train test splits and train groups
     """
-    train_inx, test_inx = next(splitter.split(df, groups=groups))
-    train_groups = list(df.drop(columns=[label_columns]).iloc[train_inx].index.get_level_values(0))
-    X_train = df.drop(columns=[label_columns]).iloc[train_inx].values
-    X_test = df.drop(columns=[label_columns]).iloc[test_inx].values
+    X = df.drop(columns=label_column)
+    y = df[label_column]
+    train_inx, test_inx = next(splitter.split(X, y, groups=groups))
+    train_groups = list(df.drop(columns=[label_column]).iloc[train_inx].index.get_level_values(0))
+    X_train = df.drop(columns=[label_column]).iloc[train_inx].values
+    X_test = df.drop(columns=[label_column]).iloc[test_inx].values
 
-    y_train = df[label_columns].iloc[train_inx].values
-    y_test = df[label_columns].iloc[test_inx].values
+    y_train = df[label_column].iloc[train_inx].values
+    y_test = df[label_column].iloc[test_inx].values
 
     return X_train, X_test, y_train, y_test, train_groups
 
@@ -46,6 +48,7 @@ def eval_grid_search(estimator,
                      X_test: np.array,
                      y_train: np.array,
                      y_test: np.array,
+                     train_groups=None):
                      is_binary: bool,
                      spliter: BaseCrossValidator):
     """
@@ -59,10 +62,11 @@ def eval_grid_search(estimator,
     :param y_test:
     :param is_binary:  indicates if the prediction is binary or not for roc curve plot
     :param spliter: splitter: sklearn spliter implementing BaseCrossValidator
+    :param train_groups:
     :return:
     """
     grid_search = GridSearchCV(estimator, grid_params, cv=spliter, n_jobs=-1, verbose=4)
-    grid_search.fit(X_train, y_train)
+    grid_search.fit(X_train, y_train, groups=train_groups)
 
     print("Best params")
     print(grid_search.best_params_)
