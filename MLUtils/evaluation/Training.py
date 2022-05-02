@@ -1,10 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from sklearn.metrics import classification_report, roc_curve
+from sklearn.metrics import classification_report, roc_curve, roc_auc_score
 from sklearn.model_selection import BaseCrossValidator, GridSearchCV
-
-from MLUtils.Visualization import plot_roc_curve
 
 LOGISTIC_REGRESSION_PARAMS = {
     "solver": ['newton-cg', 'lbfgs', 'liblinear'],
@@ -48,13 +46,15 @@ def eval_grid_search(estimator,
                      X_test: np.array,
                      y_train: np.array,
                      y_test: np.array,
-                     train_groups=None):
                      is_binary: bool,
-                     spliter: BaseCrossValidator):
+                     spliter: BaseCrossValidator,
+                     train_groups=None):
     """
-    Running a full evaluation of the data. Training a classifier using gridsearch with grid parameters. Evaluating the
-    test data using the best grid params and plot the classification report of the train and test data
-    :param estimator: sklearn estimator to be used for the gridsearch
+    Running a full evaluation of the data. Training a classifier using grid search with grid parameters. Evaluating the
+    test data using the best grid params and plot the classification report of the train and test data.
+    If the data has binary labels and is_binary is true than also calculate the ROC score and returns the false positive
+    rate and true positive rates.
+    :param estimator: sklearn estimator to be used for the grid search
     :param grid_params: the parameters to test
     :param X_train:
     :param X_test:
@@ -87,8 +87,11 @@ def eval_grid_search(estimator,
     print('-' * 50)
 
     if is_binary:
-        y_pred_proba = best_estimator.predict_proba(X_test)
+        y_pred_proba = best_estimator.predict_proba(X_test)[::, 1]
+        score = roc_auc_score(y_test, y_pred_proba)
+        print(f"ROC curve score {score}")
         fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
-        plot_roc_curve(fpr, tpr)
+        return grid_search, fpr, tpr
 
     return grid_search
+
