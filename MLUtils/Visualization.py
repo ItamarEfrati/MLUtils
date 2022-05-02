@@ -44,3 +44,10 @@ def plot_graphs(data_dict, n_rows, n_columns, x_label, y_label, row_size=6, col_
         plot_simple_graph(current_values[1][0], current_values[1][1], x_label=x_label[i], y_label=y_label[i],
                           title=current_values[0], ax=ax)
     plt.show()
+
+
+def plot_roc_curve(fpr, tpr):
+    plt.plot(fpr, tpr)
+    plt.ylabel('True Positive Rate')
+    plt.xlabel('False Positive Rate')
+    plt.show()

@@ -1,7 +1,10 @@
 import numpy as np
 import pandas as pd
-from sklearn.metrics import classification_report
+
+from sklearn.metrics import classification_report, roc_curve
 from sklearn.model_selection import BaseCrossValidator, GridSearchCV
+
+from MLUtils.Visualization import plot_roc_curve
 
 LOGISTIC_REGRESSION_PARAMS = {
     "solver": ['newton-cg', 'lbfgs', 'liblinear'],
@@ -43,6 +46,7 @@ def eval_grid_search(estimator,
                      X_test: np.array,
                      y_train: np.array,
                      y_test: np.array,
+                     is_binary: bool,
                      spliter: BaseCrossValidator):
     """
     Running a full evaluation of the data. Training a classifier using gridsearch with grid parameters. Evaluating the
@@ -53,6 +57,7 @@ def eval_grid_search(estimator,
     :param X_test:
     :param y_train:
     :param y_test:
+    :param is_binary:  indicates if the prediction is binary or not for roc curve plot
     :param spliter: splitter: sklearn spliter implementing BaseCrossValidator
     :return:
     """
@@ -63,18 +68,23 @@ def eval_grid_search(estimator,
     print(grid_search.best_params_)
     print('-' * 50)
 
-    best_classifier = grid_search.best_estimator_
+    best_estimator = grid_search.best_estimator_
 
-    y_pred = best_classifier.predict(X_train)
+    y_pred = best_estimator.predict(X_train)
 
     print("Train classification report")
     print(classification_report(y_train, y_pred))
     print('-' * 50)
 
-    y_pred = best_classifier.predict(X_test)
+    y_pred = best_estimator.predict(X_test)
 
     print("Test classification report")
     print(classification_report(y_test, y_pred))
     print('-' * 50)
+
+    if is_binary:
+        y_pred_proba = best_estimator.predict_proba(X_test)
+        fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
+        plot_roc_curve(fpr, tpr)
 
     return grid_search
